@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>計畫案與知識庫管理系統 (Optimized Edition)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans" x-data="appData()" x-init="init()">
+
+  <!-- 登入 -->
+  <div x-show="!loggedIn" x-cloak class="fixed inset-0 bg-slate-50 flex items-center justify-center z-[100] p-4">
+    <form @submit.prevent="login" class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-8 space-y-5">
+      <div class="flex items-center space-x-3">
+        <div class="bg-blue-600 text-white p-2 rounded-lg font-bold">PROJ</div>
+        <span class="font-bold text-lg">ProjectHub</span>
+      </div>
+      <input type="password" x-model="loginPassword" required placeholder="系統密碼" class="w-full p-3 border rounded-lg text-sm bg-slate-50 outline-none" />
+      <p x-show="loginError" x-text="loginError" class="text-sm text-red-600"></p>
+      <button type="submit" :disabled="busy" class="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-semibold" x-text="busy ? '連線中…' : '登入'"></button>
+    </form>
+  </div>
+
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- 側邊欄 -->
+    <aside class="w-64 bg-slate-900 text-slate-300 hidden md:flex flex-col justify-between border-r border-slate-800">
+      <div>
+        <div class="p-6 border-b border-slate-800 flex items-center space-x-3">
+          <div class="bg-blue-600 text-white p-2 rounded-lg font-bold">PROJ</div>
+          <span class="font-bold text-white tracking-wide">ProjectHub</span>
+        </div>
+        <nav class="p-4 space-y-1">
+          <template x-for="tab in navTabs" :key="tab.id">
+            <button @click="currentTab = tab.id" 
+                    :class="currentTab === tab.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white text-slate-400'" 
+                    class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-colors">
+              <i :data-lucide="tab.icon" class="w-5 h-5"></i>
+              <span x-text="tab.name"></span>
+            </button>
+          </template>
+        </nav>
+      </div>
+      <div class="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">v3.5 Lightweight</div>
+    </aside>
+
+    <!-- 主體內容 -->
+    <div class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      
+      <!-- 頂部列 -->
+      <header class="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm">
+        <h1 class="text-lg font-bold text-slate-800" x-text="getTabTitle()"></h1>
+        <div class="flex items-center space-x-3">
+          <button x-show="currentTab === 'expenses'" @click="openModal('expense')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-2 shadow-sm">
+            <i data-lucide="plus" class="w-4 h-4"></i><span>新增核銷單據</span>
+          </button>
+          <button x-show="currentTab === 'payees'" @click="openModal('payee')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-2 shadow-sm">
+            <i data-lucide="user-plus" class="w-4 h-4"></i><span>歸檔新受款對象</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- 內容區 -->
+      <main class="p-6 max-w-7xl mx-auto w-full space-y-6">
+        
+        <!-- 儀表板 -->
+        <div x-show="currentTab === 'dashboard'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400">進行中計畫</p><p class="text-3xl font-bold mt-2" x-text="projects.length + ' 個'"></p></div>
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400">本月累計核銷</p><p class="text-3xl font-bold text-blue-600 mt-2" x-text="'NT$ ' + monthPaid.toLocaleString()"></p></div>
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400">待審核單據</p><p class="text-3xl font-bold text-amber-600 mt-2" x-text="pendingCount + ' 筆'"></p></div>
+          <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400">歸檔受款對象</p><p class="text-3xl font-bold text-emerald-600 mt-2" x-text="payees.length + ' 位/家'"></p></div>
+        </div>
+
+        <!-- 計畫主檔 -->
+        <div x-show="currentTab === 'projects'" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="text-lg font-bold text-slate-800">計畫案總覽清單</h3>
+          <p class="text-slate-500 text-sm mt-1">管理與檢視目前進行中的所有專案主檔資料。</p>
+        </div>
+
+        <!-- 經費與核銷管理 -->
+        <div x-show="currentTab === 'expenses'" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+          <div class="flex justify-between items-center">
+            <h3 class="text-lg font-bold text-slate-800">經費與核銷明細</h3>
+            <button @click="openModal('expense')" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">新增核銷單據</button>
+          </div>
+          <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="w-full text-left text-sm text-slate-600">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr><th class="p-4">核銷單號</th><th class="p-4">計畫案</th><th class="p-4">科目</th><th class="p-4">受款對象</th><th class="p-4">金額</th><th class="p-4">狀態</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                <template x-for="item in expenseList" :key="item.id">
+                  <tr class="hover:bg-slate-50">
+                    <td class="p-4 font-mono font-medium" x-text="item.voucherNo"></td>
+                    <td class="p-4" x-text="getName(projects, item.projectId)"></td>
+                    <td class="p-4"><span class="px-2 py-0.5 rounded text-xs bg-purple-100 text-purple-700" x-text="item.category"></span></td>
+                    <td class="p-4 font-semibold" x-text="getName(payees, item.payeeId)"></td>
+                    <td class="p-4 font-semibold text-slate-900" x-text="'NT$ ' + Number(item.amount).toLocaleString()"></td>
+                    <td class="p-4"><span class="px-2.5 py-1 rounded-full text-xs font-semibold" :class="item.status === '已撥款' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" x-text="item.status"></span></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 受款對象與薪資維護 -->
+        <div x-show="currentTab === 'payees'" class="space-y-6">
+          <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div>
+              <h3 class="text-lg font-bold text-slate-800">受款對象與個人領款歷史查詢</h3>
+              <p class="text-slate-500 text-sm mt-1">統一維護廠商及個人帳戶，即時查詢個人累計領款總額與核銷明細。</p>
+            </div>
+            <button @click="openModal('payee')" class="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-sm font-semibold shadow-sm">歸檔新受款對象</button>
+          </div>
+
+          <div class="flex gap-3">
+            <input type="text" x-model="payeeSearchQuery" placeholder="搜尋姓名、廠商或統編..." class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none shadow-sm" />
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <template x-for="payee in filteredPayees" :key="payee.id">
+              <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                <div class="flex justify-between items-start border-b border-slate-100 pb-3">
+                  <div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded" :class="payee.type === 'person' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'" x-text="payee.type === 'person' ? '👤 個人' : '🏢 廠商'"></span>
+                    <h4 class="text-base font-bold text-slate-800 mt-1" x-text="payee.name"></h4>
+                  </div>
+                  <button @click="deletePayee(payee.id)" class="text-slate-400 hover:text-red-600 text-xs">刪除</button>
+                </div>
+
+                <template x-if="payee.type === 'person'">
+                  <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2 text-xs">
+                    <div class="flex justify-between"><span class="text-slate-500">已領金額：</span><span class="font-bold text-emerald-600" x-text="'NT$ ' + Number(getSum(payee.id, '已撥款')).toLocaleString()"></span></div>
+                    <div class="flex justify-between"><span class="text-slate-500">待審核：</span><span class="font-bold text-amber-600" x-text="'NT$ ' + Number(getSum(payee.id, '審核中')).toLocaleString()"></span></div>
+                    <button @click="openPersonDetail(payee)" class="w-full py-1.5 bg-white border rounded-lg font-semibold text-blue-600 hover:bg-slate-100">查看領款歷史</button>
+                  </div>
+                </template>
+
+                <div class="space-y-1 text-xs">
+                  <p class="text-slate-400 font-semibold uppercase">歸檔帳戶</p>
+                  <template x-for="acc in getAccounts(payee.id)" :key="acc.id">
+                    <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                      <div class="font-semibold text-slate-700" x-text="acc.bankName + ' (' + acc.bankCode + ')'"></div>
+                      <div class="font-mono text-slate-900 font-bold" x-text="acc.accountNumber"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 文件管理 -->
+        <div x-show="currentTab === 'documents'" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <h3 class="text-lg font-bold text-slate-800">文件與產出庫</h3>
+          <p class="text-slate-500 text-sm mt-1">統一歸檔存放計畫書、簡報與核銷掃描憑證附件。</p>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- 通用彈跳視窗 Modal -->
+    <div x-show="activeModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" style="display: none;">
+      <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5" @click.away="activeModal = null">
+        
+        <!-- Modal 1: 新增核銷單 -->
+        <template x-if="activeModal === 'expense'">
+          <form @submit.prevent="submitExpense" class="space-y-4">
+            <h3 class="text-lg font-bold text-slate-800 border-b pb-3">新增費用核銷單據</h3>
+            <div><label class="block text-xs font-semibold mb-1">單號（留白自動編號）</label><input type="text" x-model="form.voucherNo" placeholder="自動產生" class="w-full p-2.5 border rounded-lg text-sm bg-slate-50 font-mono" /></div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="block text-xs font-semibold mb-1">計畫</label><select x-model="form.projectId" required class="w-full p-2.5 border rounded-lg text-sm"><template x-for="p in projects"><option :value="p.id" x-text="p.name"></option></template></select></div>
+              <div><label class="block text-xs font-semibold mb-1">科目</label><select x-model="form.category" required class="w-full p-2.5 border rounded-lg text-sm"><template x-for="c in categories"><option :value="c" x-text="c"></option></template></select></div>
+            </div>
+            <div><label class="block text-xs font-semibold mb-1">受款對象</label><select x-model="form.payeeId" required class="w-full p-2.5 border rounded-lg text-sm"><template x-for="p in payees"><option :value="p.id" x-text="p.name"></option></template></select></div>
+            <div><label class="block text-xs font-semibold mb-1">金額 (NTD)</label><input type="number" x-model="form.amount" min="1" required class="w-full p-2.5 border rounded-lg text-sm" /></div>
+            <div class="flex space-x-3 pt-3"><button type="button" @click="activeModal = null" class="flex-1 py-2.5 bg-slate-100 rounded-lg text-sm">取消</button><button type="submit" class="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm shadow-md">送出</button></div>
+          </form>
+        </template>
+
+        <!-- Modal 2: 新增受款對象 -->
+        <template x-if="activeModal === 'payee'">
+          <form @submit.prevent="submitPayee" class="space-y-4">
+            <h3 class="text-lg font-bold text-slate-800 border-b pb-3">歸檔新受款對象與帳戶</h3>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="block text-xs font-semibold mb-1">類型</label><select x-model="payeeForm.type" class="w-full p-2.5 border rounded-lg text-sm"><option value="person">個人</option><option value="company">廠商</option></select></div>
+              <div><label class="block text-xs font-semibold mb-1">姓名/名稱</label><input type="text" x-model="payeeForm.name" required class="w-full p-2.5 border rounded-lg text-sm" /></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="block text-xs font-semibold mb-1">銀行代碼</label><input type="text" x-model="payeeForm.bankCode" required class="w-full p-2.5 border rounded-lg text-sm" /></div>
+              <div><label class="block text-xs font-semibold mb-1">銀行名稱</label><input type="text" x-model="payeeForm.bankName" required class="w-full p-2.5 border rounded-lg text-sm" /></div>
+            </div>
+            <div><label class="block text-xs font-semibold mb-1">帳號</label><input type="text" x-model="payeeForm.accountNumber" required class="w-full p-2.5 border rounded-lg text-sm font-mono" /></div>
+            <div class="flex space-x-3 pt-3"><button type="button" @click="activeModal = null" class="flex-1 py-2.5 bg-slate-100 rounded-lg text-sm">取消</button><button type="submit" class="flex-1 py-2.5 bg-emerald-600 text-white rounded-lg text-sm shadow-md">儲存</button></div>
+          </form>
+        </template>
+
+      </div>
+    </div>
+
+    <!-- 個人歷史明細 Modal -->
+    <div x-show="openDetailModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" style="display: none;">
+      <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4" @click.away="openDetailModal = false">
+        <div class="flex justify-between items-center border-b pb-3">
+          <h3 class="text-lg font-bold" x-text="(selectedPerson?.name || '') + ' - 領款歷史'"></h3>
+          <button @click="openDetailModal = false">✕</button>
+        </div>
+        <div class="overflow-x-auto rounded-xl border">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 border-b"><tr><th class="p-3">單號</th><th class="p-3">科目</th><th class="p-3">金額</th><th class="p-3">狀態</th></tr></thead>
+            <tbody class="divide-y">
+              <template x-for="item in expenseList.filter(e => e.payeeId === selectedPerson?.id)" :key="item.id">
+                <tr>
+                  <td class="p-3 font-mono" x-text="item.voucherNo"></td>
+                  <td class="p-3" x-text="item.category"></td>
+                  <td class="p-3 font-bold" x-text="'NT$ ' + Number(item.amount).toLocaleString()"></td>
+                  <td class="p-3" x-text="item.status"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ======= 設定（管理員填寫） =======
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyN71q9vZtmNXrB4-_uvp6rud0vbaRoOKNWknOdUS9C9oag8X-OSeztpWrM_geoHB1deQ/exec';
+
+    function appData() {
+      return {
+        loggedIn: false, loginPassword: '', loginError: '', password: '', busy: false,
+        currentTab: 'payees',
+        activeModal: null,
+        openDetailModal: false,
+        selectedPerson: null,
+        payeeSearchQuery: '',
+
+        navTabs: [
+          { id: 'dashboard', name: '儀表板', icon: 'layout-dashboard' },
+          { id: 'projects', name: '計畫主檔', icon: 'folder-kanban' },
+          { id: 'expenses', name: '經費核銷', icon: 'receipt' },
+          { id: 'payees', name: '受款對象', icon: 'users' },
+          { id: 'documents', name: '文件庫', icon: 'file-text' }
+        ],
+
+        categories: ['人事費', '業務費', '設備費', '差旅費', '雜支 / 其他'],
+        projects: [],
+        payees: [],
+        accountsDb: [],
+        expenseList: [],
+
+        form: { voucherNo: '', projectId: '', category: '業務費', payeeId: '', amount: '' },
+        payeeForm: { type: 'person', role: '助理', name: '', taxOrId: '', bankCode: '', bankName: '', accountNumber: '' },
+
+        /* ---- 連線 ---- */
+        async init() {
+          this.$watch('currentTab', () => this.$nextTick(() => lucide.createIcons()));
+          this.$watch('loggedIn', () => this.$nextTick(() => lucide.createIcons()));
+          const saved = sessionStorage.getItem('exp_pw');
+          if (saved) { this.password = saved; await this.reload(); }
+        },
+        async api(action, payload) {
+          const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ password: this.password, action, payload }) });
+          const data = await res.json();
+          if (!data.ok) {
+            if (data.code === 'AUTH') { sessionStorage.removeItem('exp_pw'); this.loggedIn = false; }
+            throw new Error(data.error || '未知錯誤');
+          }
+          return data.data;
+        },
+        async login() {
+          this.loginError = ''; this.busy = true;
+          try {
+            this.password = this.loginPassword;
+            await this.api('login');
+            sessionStorage.setItem('exp_pw', this.password);
+            this.loginPassword = '';
+            await this.reload();
+          } catch (e) {
+            this.password = '';
+            this.loginError = e.message === '密碼錯誤' ? '密碼錯誤，請再試一次' : '連線失敗：' + e.message;
+          } finally { this.busy = false; }
+        },
+        async reload() {
+          const d = await this.api('getAll');
+          this.projects = d.projects; this.payees = d.payees;
+          this.accountsDb = d.accounts; this.expenseList = d.expenses.slice().reverse();
+          if (!this.form.projectId && this.projects.length) this.form.projectId = this.projects[0].id;
+          if (!this.form.payeeId && this.payees.length) this.form.payeeId = this.payees[0].id;
+          this.loggedIn = true;
+        },
+
+        /* ---- 原本的功能 ---- */
+        openModal(type) { this.activeModal = type; },
+        getName(list, id) { const item = list.find(i => i.id === id); return item ? item.name : '未知'; },
+        getAccounts(payeeId) { return this.accountsDb.filter(a => a.payeeId === payeeId); },
+        getSum(payeeId, status) { return this.expenseList.filter(e => e.payeeId === payeeId && e.status === status).reduce((s, e) => s + Number(e.amount), 0); },
+        openPersonDetail(person) { this.selectedPerson = person; this.openDetailModal = true; },
+
+        get filteredPayees() {
+          if (!this.payeeSearchQuery) return this.payees;
+          const q = this.payeeSearchQuery.toLowerCase().trim();
+          return this.payees.filter(p => String(p.name).toLowerCase().includes(q) || (p.taxOrId && String(p.taxOrId).includes(q)));
+        },
+        get pendingCount() { return this.expenseList.filter(e => e.status === '審核中').length; },
+        get monthPaid() {
+          const ym = new Date().toISOString().slice(0, 7);
+          return this.expenseList.filter(e => e.status === '已撥款' && String(e.createdAt).startsWith(ym)).reduce((s, e) => s + Number(e.amount), 0);
+        },
+
+        getTabTitle() {
+          const map = { dashboard: '儀表板', projects: '計畫主檔管理', expenses: '經費與核銷管理', payees: '受款對象與薪資維護', documents: '文件與產出庫' };
+          return map[this.currentTab] || '';
+        },
+
+        async submitExpense() {
+          try {
+            await this.api('addExpense', { ...this.form });
+            await this.reload();
+            this.form = { voucherNo: '', projectId: this.projects[0] ? this.projects[0].id : '', category: '業務費', payeeId: '', amount: '' };
+            alert('核銷單建立成功！');
+            this.activeModal = null;
+          } catch (e) { alert('建立失敗：' + e.message); }
+        },
+
+        async submitPayee() {
+          try {
+            await this.api('addPayee', { ...this.payeeForm });
+            await this.reload();
+            this.payeeForm = { type: 'person', role: '助理', name: '', taxOrId: '', bankCode: '', bankName: '', accountNumber: '' };
+            alert('受款對象歸檔成功！');
+            this.activeModal = null;
+          } catch (e) { alert('儲存失敗：' + e.message); }
+        },
+
+        async deletePayee(id) {
+          const p = this.payees.find(x => x.id === id);
+          if (!confirm('確定刪除「' + (p ? p.name : id) + '」？')) return;
+          try { await this.api('deletePayee', { id }); await this.reload(); }
+          catch (e) { alert('刪除失敗：' + e.message); }
+        }
+      }
+    }
+    document.addEventListener('DOMContentLoaded', () => { lucide.createIcons(); });
+  </script>
+</body>
+</html>
