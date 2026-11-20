@@ -1,0 +1,1476 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>財務綜合追蹤系統 - 計畫建檔、期款撥付、經費核銷、薪資、廠商款項與匯款帳戶</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-slate-50 font-sans text-slate-800 min-h-screen">
+
+    <!-- 登入 -->
+    <div id="login-overlay" class="fixed inset-0 bg-slate-50 flex items-center justify-center z-[100] p-4 hidden">
+        <form onsubmit="handleLogin(event)" class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-8 space-y-5">
+            <div class="flex items-center gap-2">
+                <i data-lucide="wallet" class="w-7 h-7 text-indigo-600"></i>
+                <div>
+                    <h1 class="font-bold text-lg text-slate-900">財務綜合追蹤系統</h1>
+                    <p class="text-xs text-slate-400">請輸入系統密碼</p>
+                </div>
+            </div>
+            <input type="password" id="login-password" required placeholder="系統密碼" class="w-full p-3 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <p id="login-error" class="text-sm text-rose-600 hidden"></p>
+            <button type="submit" id="login-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg font-semibold">登入</button>
+        </form>
+    </div>
+    <!-- 處理中 -->
+    <div id="busy-overlay" class="fixed inset-0 bg-slate-900/30 backdrop-blur-[1px] hidden items-center justify-center z-[90]">
+        <div class="bg-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-slate-700 flex items-center gap-2">
+            <i data-lucide="loader-circle" class="w-4 h-4 animate-spin text-indigo-600"></i><span id="busy-text">處理中…</span>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <!-- 頁頭資訊 -->
+        <header class="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 mb-8 border-b pb-5 border-slate-200">
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 flex items-center gap-2">
+                    <i data-lucide="wallet" class="w-7 h-7 text-indigo-600"></i>
+                    財務綜合追蹤系統
+                </h1>
+                <p class="text-sm text-slate-500 mt-1">涵蓋計畫建檔（期程、總經費、期款撥付）、各科目核銷、預支款沖銷、員工薪資、廠商款項、匯款帳戶與多檔附件（單檔上限 25MB，附件存於 Google Drive）</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                    <label for="year-filter" class="text-xs font-medium text-slate-500">年度：</label>
+                    <select id="year-filter" onchange="setYearFilter(this.value)" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="ALL">全部年度</option>
+                    </select>
+                </div>
+                <div class="bg-slate-200 p-1 rounded-xl flex flex-wrap gap-1">
+                    <button onclick="switchTab('setup')" id="tab-setup-btn" class="px-3.5 py-2 rounded-lg font-medium text-sm transition text-slate-700 hover:bg-slate-300">
+                        計畫建檔與期款撥付
+                    </button>
+                    <button onclick="switchTab('project')" id="tab-project-btn" class="px-3.5 py-2 rounded-lg font-medium text-sm transition bg-indigo-600 text-white shadow-sm">
+                        計畫經費科目追蹤
+                    </button>
+                    <button onclick="switchTab('salary')" id="tab-salary-btn" class="px-3.5 py-2 rounded-lg font-medium text-sm transition text-slate-700 hover:bg-slate-300">
+                        員工薪資追蹤
+                    </button>
+                    <button onclick="switchTab('vendor')" id="tab-vendor-btn" class="px-3.5 py-2 rounded-lg font-medium text-sm transition text-slate-700 hover:bg-slate-300">
+                        廠商款項追蹤
+                    </button>
+                </div>
+                <button onclick="handleLogout()" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition border border-slate-200">登出</button>
+                <button onclick="exportToExcel()" class="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition shadow-sm border border-emerald-700">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                    匯出 Excel
+                </button>
+            </div>
+        </header>
+
+        <!-- 數據儀表板 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400" id="kpi-1-label">總預計支出</div>
+                    <div class="text-2xl font-bold text-slate-900 mt-1" id="total-amount">NT$ 0</div>
+                </div>
+                <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <i data-lucide="calculator" class="w-6 h-6"></i>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-emerald-500" id="kpi-2-label">已結清／已付款金額</div>
+                    <div class="text-2xl font-bold text-emerald-600 mt-1" id="paid-amount">NT$ 0</div>
+                </div>
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-semibold uppercase tracking-wider text-amber-500" id="kpi-3-label">待處理解核／付款</div>
+                    <div class="text-2xl font-bold text-amber-600 mt-1" id="unpaid-amount">NT$ 0</div>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                    <i data-lucide="clock" class="w-6 h-6"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- 各計畫經費科目彙總卡片 -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm mb-8">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="layers" class="w-4 h-4 text-indigo-600"></i>
+                        計畫經費科目統計（業務費、人事費、管理費、資本門）
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5" id="summary-subtitle">彙整「計畫經費科目追蹤」中各科目的累計核銷金額，可依計畫篩選檢視</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label for="summary-project-filter" class="text-xs font-medium text-slate-500">篩選計畫：</label>
+                    <select id="summary-project-filter" onchange="renderCategorySummary()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="ALL">全部計畫</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="category-summary-cards"></div>
+        </div>
+
+        <!-- 區塊 0：計畫建檔與期款撥付（前端作業） -->
+        <section id="section-setup" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <i data-lucide="folder-plus" class="w-5 h-5 text-indigo-600"></i>
+                    計畫建檔與期款撥付設定（前端作業）
+                </h2>
+                <form id="setup-form" onsubmit="addSetupRecord(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">年度（民國）</label>
+                        <input type="number" id="stp-year" min="100" max="200" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">計畫編號</label>
+                        <input type="text" id="stp-code" placeholder="例如：115-HCH-01" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">計畫名稱</label>
+                        <input type="text" id="stp-name" placeholder="例如：新竹青創基地營運計畫" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">委託／補助單位</label>
+                        <input type="text" id="stp-agency" placeholder="例如：新竹市政府／經濟部" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核定總經費 (NT$)</label>
+                        <input type="number" id="stp-total" placeholder="例如：1500000" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-indigo-700 bg-indigo-50/50 border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">計畫起日</label>
+                        <input type="date" id="stp-start" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">計畫迄日</label>
+                        <input type="date" id="stp-end" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">期款期別</label>
+                        <select id="stp-tranche" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                            <option value="第1期款（簽約撥付）">第1期款（簽約撥付）</option>
+                            <option value="第2期款（期中查核）">第2期款（期中查核）</option>
+                            <option value="第3期款（期末結案）">第3期款（期末結案）</option>
+                            <option value="一筆撥付">一筆撥付</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">本批撥付金額 (NT$)</label>
+                        <input type="number" id="stp-tranche-amt" placeholder="例如：600000" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">預計／實際撥付日期</label>
+                        <input type="date" id="stp-pay-date" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">入帳銀行（行庫／分行）</label>
+                        <input type="text" id="stp-bank" placeholder="例如：台新銀行 005 新竹分行" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">入帳帳號</label>
+                        <input type="text" id="stp-account" placeholder="例如：2068-10-0012345-6" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">撥付條件／備註</label>
+                        <input type="text" id="stp-note" placeholder="例如：檢附領據與工作計畫書" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-3">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">契約／核定公文／撥款通知附件（支援多檔，單檔 25MB）</label>
+                        <input type="file" id="stp-file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx" onchange="handleFileInput(event, 'stp')" class="w-full border border-slate-300 rounded-lg p-2 text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 bg-slate-50 transition">
+                        <div id="stp-file-preview" class="text-[11px] text-indigo-600 mt-1 space-y-0.5 hidden"></div>
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-1 flex items-end justify-end">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-5 py-2.5 text-sm font-medium transition flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> <span id="stp-submit-text">新增計畫紀錄</span>
+                        </button>
+                        <button type="button" id="stp-cancel-btn" onclick="cancelEdit('stp')" class="hidden ml-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-4 py-2.5 text-sm font-medium transition">取消編輯</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 資料表格 -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <tr>
+                            <th class="p-4 min-w-[70px]">年度</th>
+                            <th class="p-4 min-w-[115px]">計畫編號</th>
+                            <th class="p-4 min-w-[155px]">計畫名稱</th>
+                            <th class="p-4 min-w-[130px]">委託/補助單位</th>
+                            <th class="p-4 min-w-[175px]">計畫期程</th>
+                            <th class="p-4 min-w-[120px]">核定總經費</th>
+                            <th class="p-4 min-w-[140px]">期款期別</th>
+                            <th class="p-4 min-w-[115px]">撥付時間</th>
+                            <th class="p-4 min-w-[120px]">本批撥付金額</th>
+                            <th class="p-4 min-w-[180px]">入帳帳戶</th>
+                            <th class="p-4 min-w-[165px]">附件</th>
+                            <th class="p-4 min-w-[140px]">備註</th>
+                            <th class="p-4 min-w-[95px]">撥付狀態</th>
+                            <th class="p-4 text-right min-w-[140px]">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="setup-table" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 區塊 1：計畫經費科目追蹤 -->
+        <section id="section-project" class="space-y-6">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-600"></i>
+                    新增計畫經費科目與預支款沖銷紀錄
+                </h2>
+                <form id="project-form" onsubmit="addProjectRecord(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">年度（民國）</label>
+                        <input type="number" id="prj-year" min="100" max="200" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核銷單號</label>
+                        <input type="text" id="prj-no" placeholder="例如：PRJ-2026-001" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">計畫名稱</label>
+                        <input type="text" id="prj-name" list="registered-project-names" placeholder="例如：新竹青創基地營運計畫" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                        <datalist id="registered-project-names"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">經費科目</label>
+                        <select id="prj-category" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                            <option value="業務費">業務費</option>
+                            <option value="人事費">人事費</option>
+                            <option value="管理費">管理費</option>
+                            <option value="資本門">資本門</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核銷／支出金額 (NT$)</label>
+                        <input type="number" id="prj-amount" placeholder="金額" oninput="calculateProjectRemaining()" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">預支款金額 (NT$，選填)</label>
+                        <input type="number" id="prj-advance" placeholder="例如：20000" oninput="calculateProjectRemaining()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">已沖銷金額 (NT$，選填)</label>
+                        <input type="number" id="prj-offset" placeholder="例如：16500" oninput="calculateProjectRemaining()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">預支款還剩多少 (自動試算)</label>
+                        <input type="number" id="prj-remaining" placeholder="預支款 - 已沖銷" readonly class="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-semibold text-indigo-700 bg-indigo-50/60 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核銷日期</label>
+                        <input type="date" id="prj-date" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款銀行（行庫／分行）</label>
+                        <input type="text" id="prj-bank" placeholder="例如：郵局 700 / 臺灣銀行" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款帳號</label>
+                        <input type="text" id="prj-account" placeholder="例如：0061234-0123456" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">憑證／單據附件（可一次選多個檔案，單檔上限 25MB）</label>
+                        <input type="file" id="prj-file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx" onchange="handleFileInput(event, 'prj')" class="w-full border border-slate-300 rounded-lg p-2 text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 bg-slate-50 transition">
+                        <div id="prj-file-preview" class="text-[11px] text-indigo-600 mt-1 space-y-0.5 hidden"></div>
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-3">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">備註說明</label>
+                        <input type="text" id="prj-note" placeholder="例如：印刷費、預支款沖銷明細" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-1 flex items-end justify-end">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-5 py-2.5 text-sm font-medium transition flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> <span id="prj-submit-text">新增計畫經費</span>
+                        </button>
+                        <button type="button" id="prj-cancel-btn" onclick="cancelEdit('prj')" class="hidden ml-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-4 py-2.5 text-sm font-medium transition">取消編輯</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 資料表格 -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <tr>
+                            <th class="p-4 min-w-[70px]">年度</th>
+                            <th class="p-4 min-w-[115px]">核銷單號</th>
+                            <th class="p-4 min-w-[140px]">計畫名稱</th>
+                            <th class="p-4 min-w-[95px]">經費科目</th>
+                            <th class="p-4 min-w-[105px]">核銷日期</th>
+                            <th class="p-4 min-w-[105px]">支出金額</th>
+                            <th class="p-4 min-w-[105px]">預支款</th>
+                            <th class="p-4 min-w-[105px]">已沖銷</th>
+                            <th class="p-4 min-w-[115px]">預支剩餘</th>
+                            <th class="p-4 min-w-[180px]">匯款帳戶</th>
+                            <th class="p-4 min-w-[165px]">附件</th>
+                            <th class="p-4 min-w-[140px]">備註</th>
+                            <th class="p-4 min-w-[110px]">關卡 / 狀態</th>
+                            <th class="p-4 text-right min-w-[140px]">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="project-table" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 區塊 2：員工薪資追蹤 -->
+        <section id="section-salary" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-600"></i>
+                    新增薪資／工讀金明細
+                </h2>
+                <form id="salary-form" onsubmit="addSalaryRecord(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">年度（民國）</label>
+                        <input type="number" id="sal-year" min="100" max="200" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核銷單號</label>
+                        <input type="text" id="sal-no" placeholder="例如：EXP-2026-001" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">對象姓名</label>
+                        <input type="text" id="sal-name" placeholder="員工/工讀生" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">人員類別</label>
+                        <select id="sal-type" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                            <option value="工讀生">工讀生</option>
+                            <option value="專任人員">專任人員</option>
+                            <option value="計畫主持人">計畫主持人</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">聘任計畫</label>
+                        <input type="text" id="sal-project" list="registered-project-names" placeholder="例如：高教深耕計畫 / 專案補助" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">發放月份</label>
+                        <input type="month" id="sal-month" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">時薪 (NT$/小時)</label>
+                        <input type="number" id="sal-hourly" placeholder="例如：200" oninput="calculateTotalSalary()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">本月工時 (小時)</label>
+                        <input type="number" id="sal-hours" step="0.5" placeholder="例如：64" oninput="calculateTotalSalary()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">總薪資 (自動計算/可自訂)</label>
+                        <input type="number" id="sal-amount" placeholder="自動試算總額" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold text-indigo-700 bg-indigo-50/50 border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款銀行（行庫／分行）</label>
+                        <input type="text" id="sal-bank" placeholder="例如：中國信託 822 新竹分行" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款帳號</label>
+                        <input type="text" id="sal-account" placeholder="例如：1235-4009-8765" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">憑證／工時表附件（支援多檔，單檔 25MB）</label>
+                        <input type="file" id="sal-file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx" onchange="handleFileInput(event, 'sal')" class="w-full border border-slate-300 rounded-lg p-2 text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 bg-slate-50 transition">
+                        <div id="sal-file-preview" class="text-[11px] text-indigo-600 mt-1 space-y-0.5 hidden"></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">備註說明</label>
+                        <input type="text" id="sal-note" placeholder="例如：含加班津貼" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-4 flex justify-end">
+                        <button type="submit" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-6 py-2.5 text-sm font-medium transition flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> <span id="sal-submit-text">新增薪資紀錄</span>
+                        </button>
+                        <button type="button" id="sal-cancel-btn" onclick="cancelEdit('sal')" class="hidden ml-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-4 py-2.5 text-sm font-medium transition">取消編輯</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 人員類別篩選 -->
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-medium text-slate-500">人員類別：</span>
+                <div id="salary-type-filter" class="bg-slate-200 p-1 rounded-xl flex flex-wrap gap-1"></div>
+                <span id="salary-type-summary" class="text-xs text-slate-500 ml-2"></span>
+            </div>
+
+            <!-- 資料表格 -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <tr>
+                            <th class="p-4 min-w-[70px]">年度</th>
+                            <th class="p-4 min-w-[120px]">核銷單號</th>
+                            <th class="p-4 min-w-[100px]">對象</th>
+                            <th class="p-4 min-w-[90px]">類別</th>
+                            <th class="p-4 min-w-[140px]">聘任計畫</th>
+                            <th class="p-4 min-w-[100px]">發放月份</th>
+                            <th class="p-4 min-w-[90px]">時薪</th>
+                            <th class="p-4 min-w-[90px]">工時</th>
+                            <th class="p-4 min-w-[110px]">總薪資</th>
+                            <th class="p-4 min-w-[180px]">匯款帳戶</th>
+                            <th class="p-4 min-w-[165px]">附件</th>
+                            <th class="p-4 min-w-[150px]">備註</th>
+                            <th class="p-4 min-w-[110px]">關卡 / 狀態</th>
+                            <th class="p-4 text-right min-w-[140px]">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="salary-table" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 區塊 3：廠商款項追蹤 -->
+        <section id="section-vendor" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-600"></i>
+                    新增廠商請款明細
+                </h2>
+                <form id="vendor-form" onsubmit="addVendorRecord(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">年度（民國）</label>
+                        <input type="number" id="ven-year" min="100" max="200" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">核銷單號</label>
+                        <input type="text" id="ven-no" placeholder="例如：INV-2026-08" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">廠商名稱</label>
+                        <input type="text" id="ven-name" placeholder="廠商公司名稱" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">合作項目／品項</label>
+                        <input type="text" id="ven-item" placeholder="請款原因" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">應付金額 (NT$)</label>
+                        <input type="number" id="ven-amount" placeholder="金額" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">付款期限</label>
+                        <input type="date" id="ven-date" required class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款銀行（行庫／分行）</label>
+                        <input type="text" id="ven-bank" placeholder="例如：玉山銀行 808 竹科分行" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">匯款帳號</label>
+                        <input type="text" id="ven-account" placeholder="例如：0987-968-0112233" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1">備註說明</label>
+                        <input type="text" id="ven-note" placeholder="發票號碼或付款備註" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white transition">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-3">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">發票／單據附件（支援多檔，單檔 25MB）</label>
+                        <input type="file" id="ven-file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx" onchange="handleFileInput(event, 'ven')" class="w-full border border-slate-300 rounded-lg p-2 text-xs text-slate-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 bg-slate-50 transition">
+                        <div id="ven-file-preview" class="text-[11px] text-indigo-600 mt-1 space-y-0.5 hidden"></div>
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-1 flex items-end justify-end">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-5 py-2.5 text-sm font-medium transition flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> <span id="ven-submit-text">新增廠商請款</span>
+                        </button>
+                        <button type="button" id="ven-cancel-btn" onclick="cancelEdit('ven')" class="hidden ml-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-4 py-2.5 text-sm font-medium transition">取消編輯</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 資料表格 -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <tr>
+                            <th class="p-4 min-w-[70px]">年度</th>
+                            <th class="p-4 min-w-[120px]">核銷單號</th>
+                            <th class="p-4 min-w-[130px]">廠商名稱</th>
+                            <th class="p-4 min-w-[140px]">項目/說明</th>
+                            <th class="p-4 min-w-[110px]">付款期限</th>
+                            <th class="p-4 min-w-[110px]">金額</th>
+                            <th class="p-4 min-w-[180px]">匯款帳戶</th>
+                            <th class="p-4 min-w-[165px]">附件</th>
+                            <th class="p-4 min-w-[150px]">備註</th>
+                            <th class="p-4 min-w-[110px]">關卡 / 狀態</th>
+                            <th class="p-4 text-right min-w-[140px]">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vendor-table" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- 附件管理與預覽 Modal -->
+    <div id="attachment-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4" onclick="closeAttachmentModal(event)">
+        <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200" onclick="event.stopPropagation()">
+            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <i data-lucide="paperclip" class="w-4 h-4 text-indigo-600 shrink-0"></i>
+                    <span id="modal-doc-title" class="font-semibold text-sm text-slate-800 truncate">單號附件管理</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button onclick="triggerAddFilesInModal()" class="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium transition">
+                        <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                        <span>新增附件</span>
+                    </button>
+                    <button onclick="closeAttachmentModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 該單號已上傳的附件清單 -->
+            <div id="modal-file-list" class="px-5 py-3 bg-slate-100/80 border-b border-slate-200 flex flex-wrap gap-2"></div>
+
+            <!-- 預覽與下載區 -->
+            <div id="modal-file-body" class="p-5 overflow-auto flex-1 flex items-center justify-center bg-slate-50"></div>
+        </div>
+    </div>
+
+    <script>
+        const CATEGORIES = ['業務費', '人事費', '管理費', '資本門'];
+        const MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024; // 單檔上限 25MB
+
+        // ======= 設定（管理員填寫） =======
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyN71q9vZtmNXrB4-_uvp6rud0vbaRoOKNWknOdUS9C9oag8X-OSeztpWrM_geoHB1deQ/exec';
+
+        let password = sessionStorage.getItem('exp_pw') || '';
+
+        function showBusy(text) {
+            const el = document.getElementById('busy-overlay');
+            document.getElementById('busy-text').textContent = text || '處理中…';
+            el.classList.remove('hidden'); el.classList.add('flex');
+            if (window.lucide) lucide.createIcons();
+        }
+        function hideBusy() {
+            const el = document.getElementById('busy-overlay');
+            el.classList.add('hidden'); el.classList.remove('flex');
+        }
+        function showLogin(msg) {
+            const el = document.getElementById('login-overlay');
+            const err = document.getElementById('login-error');
+            if (msg) { err.textContent = msg; err.classList.remove('hidden'); } else { err.classList.add('hidden'); }
+            el.classList.remove('hidden');
+            if (window.lucide) lucide.createIcons();
+        }
+        function hideLogin() { document.getElementById('login-overlay').classList.add('hidden'); }
+
+        async function api(action, payload) {
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ password, action, payload }) });
+            const data = await res.json();
+            if (!data.ok) {
+                if (data.code === 'AUTH') { sessionStorage.removeItem('exp_pw'); password = ''; showLogin('密碼錯誤或已變更，請重新登入'); }
+                throw new Error(data.error || '未知錯誤');
+            }
+            return data.data;
+        }
+
+        async function run(label, fn) {
+            showBusy(label);
+            try { return await fn(); }
+            catch (e) { alert((label || '操作') + '失敗：' + e.message); throw e; }
+            finally { hideBusy(); }
+        }
+
+        async function loadAll() {
+            const d = await api('getAll');
+            if (!d || !Array.isArray(d.setup)) throw new Error('Google 試算表那邊還是舊版程式，請重新貼上 Code-v6.gs、執行 setup、並部署「新版本」');
+            setupData = d.setup; projectData = d.project; salaryData = d.salary; vendorData = d.vendor;
+            if (d.statusOptions) statusOptions = d.statusOptions;
+            if (d.staffTypes) { staffTypes = d.staffTypes; renderStaffTypeOptions(); }
+            render();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true; btn.textContent = '連線中…';
+            try {
+                password = document.getElementById('login-password').value;
+                await api('login');
+                sessionStorage.setItem('exp_pw', password);
+                await loadAll();
+                hideLogin();
+                document.getElementById('login-password').value = '';
+            } catch (err) {
+                password = '';
+                showLogin(err.message === '密碼錯誤' ? '密碼錯誤，請再試一次' : '連線失敗：' + err.message);
+            } finally { btn.disabled = false; btn.textContent = '登入'; }
+        }
+
+        function handleLogout() {
+            sessionStorage.removeItem('exp_pw'); password = '';
+            setupData = []; projectData = []; salaryData = []; vendorData = [];
+            render();
+            showLogin();
+        }
+
+        async function boot() {
+            if (!password) { showLogin(); return; }
+            showBusy('載入資料中…');
+            try { await loadAll(); hideLogin(); }
+            catch (e) { if (password) showLogin('連線失敗：' + e.message); }
+            finally { hideBusy(); }
+        }
+
+        let pendingAttachments = {
+            stp: [],
+            prj: [],
+            sal: [],
+            ven: []
+        };
+
+        let attachmentMemoryCache = {};   // fileId -> 檔案內容（本次開啟期間快取）
+
+        let modalContext = {
+            type: null,
+            recordId: null,
+            selectedAttId: null
+        };
+
+        let setupData = [];
+
+        let projectData = [];
+
+        let salaryData = [];
+
+        let vendorData = [];
+
+        let currentTab = 'project';
+        let statusOptions = {
+            setup: ['待撥付', '審核中', '已撥付', '退件'],
+            project: ['待核銷', '審核中', '已結算', '退件'],
+            salary: ['待核銷', '審核中', '已結算', '退件'],
+            vendor: ['待付款', '審核中', '已付款', '退件']
+        };
+        const DONE_STATUS = { setup: '已撥付', project: '已結算', salary: '已結算', vendor: '已付款' };
+        const PREFIX = { setup: 'stp', project: 'prj', salary: 'sal', vendor: 'ven' };
+        const FORM_ID = { setup: 'setup-form', project: 'project-form', salary: 'salary-form', vendor: 'vendor-form' };
+        const ADD_LABEL = { stp: '新增計畫紀錄', prj: '新增計畫經費', sal: '新增薪資紀錄', ven: '新增廠商請款' };
+        let editing = { setup: null, project: null, salary: null, vendor: null };
+        let salaryFilter = 'ALL';
+        let yearFilter = 'ALL';
+        let staffTypes = ['工讀生', '專任人員', '計畫主持人'];
+        const ROC_YEAR = new Date().getFullYear() - 1911;
+        function byYear(list) { return yearFilter === 'ALL' ? list : list.filter(i => String(i.year || '') === String(yearFilter)); }
+        function setYearFilter(v) { yearFilter = v; render(); }
+        function renderYearFilter() {
+            const years = [...new Set([...setupData, ...projectData, ...salaryData, ...vendorData].map(i => i.year).filter(Boolean).map(String))].sort((a, b) => b - a);
+            const sel = document.getElementById('year-filter');
+            sel.innerHTML = `<option value="ALL">全部年度</option>` + years.map(y => `<option value="${y}">${y} 年度</option>`).join('');
+            sel.value = years.includes(String(yearFilter)) ? yearFilter : 'ALL';
+            if (sel.value === 'ALL') yearFilter = 'ALL';
+        }
+        function staffTypeClass(t) {
+            if (t === '專任人員') return 'bg-violet-50 text-violet-700 border-violet-200';
+            if (t === '計畫主持人') return 'bg-amber-50 text-amber-700 border-amber-200';
+            return 'bg-sky-50 text-sky-700 border-sky-200';
+        }
+        function renderStaffTypeOptions() {
+            const sel = document.getElementById('sal-type');
+            const cur = sel.value;
+            sel.innerHTML = staffTypes.map(t => `<option value="${t}">${t}</option>`).join('');
+            if (staffTypes.includes(cur)) sel.value = cur;
+        }
+        function defaultYears() {
+            ['stp', 'prj', 'sal', 'ven'].forEach(p => { const el = document.getElementById(`${p}-year`); if (el && !el.value) el.value = ROC_YEAR; });
+        }
+        function setSalaryFilter(v) { salaryFilter = v; render(); }
+        function renderSalaryFilterBar() {
+            const bar = document.getElementById('salary-type-filter');
+            bar.innerHTML = ['ALL', ...staffTypes].map(v => `<button onclick="setSalaryFilter('${v}')" data-v="${v}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition">${v === 'ALL' ? '全部' : v}</button>`).join('');
+            document.querySelectorAll('#salary-type-filter button').forEach(b => {
+                b.className = b.dataset.v === salaryFilter
+                    ? 'px-3 py-1.5 rounded-lg text-xs font-medium transition bg-indigo-600 text-white shadow-sm'
+                    : 'px-3 py-1.5 rounded-lg text-xs font-medium transition text-slate-700 hover:bg-slate-300';
+            });
+            const sum = (t) => byYear(salaryData).filter(i => (i.staffType || '工讀生') === t).reduce((a, c) => a + Number(c.amount), 0);
+            const cnt = (t) => byYear(salaryData).filter(i => (i.staffType || '工讀生') === t).length;
+            document.getElementById('salary-type-summary').textContent =
+                staffTypes.map(t => `${t} ${cnt(t)} 筆 NT$ ${sum(t).toLocaleString()}`).join(' ｜ ');
+        }
+
+        function statusClass(type, status) {
+            if (status === DONE_STATUS[type]) return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            if (status === '退件') return 'bg-rose-100 text-rose-700 border-rose-200';
+            if (status === '審核中') return 'bg-sky-100 text-sky-700 border-sky-200';
+            return 'bg-amber-100 text-amber-700 border-amber-200';
+        }
+        function renderStatusSelect(type, item) {
+            const opts = statusOptions[type].includes(item.status) ? statusOptions[type] : [item.status, ...statusOptions[type]];
+            return `<select onchange="setStatus('${type}', '${item.id}', this.value)" class="px-2.5 py-1 rounded-full text-xs font-medium border cursor-pointer ${statusClass(type, item.status)}">
+                ${opts.map(o => `<option value="${o}" ${o === item.status ? 'selected' : ''}>${o}</option>`).join('')}
+            </select>`;
+        }
+        async function setStatus(type, id, status) {
+            const item = getListByType(type).find(i => i.id === id);
+            if (!item) return;
+            try {
+                await run('更新關卡', async () => { const r = await api('setStatus', { type, id, status }); item.status = r.status; });
+            } catch (e) { /* 已提示 */ }
+            render();
+        }
+
+        const FIELDS = {
+            setup: { year: 'stp-year', code: 'stp-code', project: 'stp-name', agency: 'stp-agency', startDate: 'stp-start', endDate: 'stp-end', totalBudget: 'stp-total', tranche: 'stp-tranche', trancheAmount: 'stp-tranche-amt', payDate: 'stp-pay-date', bankName: 'stp-bank', accountNo: 'stp-account', note: 'stp-note' },
+            project: { year: 'prj-year', docNo: 'prj-no', project: 'prj-name', category: 'prj-category', amount: 'prj-amount', advanceAmount: 'prj-advance', offsetAmount: 'prj-offset', date: 'prj-date', bankName: 'prj-bank', accountNo: 'prj-account', note: 'prj-note' },
+            salary: { year: 'sal-year', docNo: 'sal-no', name: 'sal-name', staffType: 'sal-type', project: 'sal-project', hourlyRate: 'sal-hourly', hoursWorked: 'sal-hours', amount: 'sal-amount', month: 'sal-month', bankName: 'sal-bank', accountNo: 'sal-account', note: 'sal-note' },
+            vendor: { year: 'ven-year', docNo: 'ven-no', name: 'ven-name', item: 'ven-item', amount: 'ven-amount', date: 'ven-date', bankName: 'ven-bank', accountNo: 'ven-account', note: 'ven-note' }
+        };
+        const NUMERIC_FIELDS = ['totalBudget', 'trancheAmount', 'amount', 'advanceAmount', 'offsetAmount', 'hourlyRate', 'hoursWorked', 'year'];
+        const DASH_FIELDS = ['bankName', 'accountNo', 'note'];
+
+        function collectForm(type) {
+            const rec = {};
+            Object.entries(FIELDS[type]).forEach(([k, id]) => {
+                let v = document.getElementById(id).value;
+                if (NUMERIC_FIELDS.includes(k)) v = Number(v) || 0;
+                else if (DASH_FIELDS.includes(k)) v = v || '-';
+                rec[k] = v;
+            });
+            return rec;
+        }
+        function fillForm(type, item) {
+            Object.entries(FIELDS[type]).forEach(([k, id]) => {
+                let v = item[k];
+                if (DASH_FIELDS.includes(k) && v === '-') v = '';
+                if (NUMERIC_FIELDS.includes(k) && !v) v = '';
+                document.getElementById(id).value = v ?? '';
+            });
+            if (type === 'project') calculateProjectRemaining();
+        }
+        function startEdit(type, id) {
+            const item = getListByType(type).find(i => i.id === id);
+            if (!item) return;
+            if (currentTab !== type) switchTab(type);
+            editing[type] = id;
+            fillForm(type, item);
+            const pfx = PREFIX[type];
+            const label = type === 'setup' ? `${item.code}（${item.tranche}）` : item.docNo;
+            document.getElementById(`${pfx}-submit-text`).textContent = `儲存修改：${label}`;
+            document.getElementById(`${pfx}-cancel-btn`).classList.remove('hidden');
+            document.getElementById(FORM_ID[type]).scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        function cancelEdit(pfx) {
+            const type = Object.keys(PREFIX).find(t => PREFIX[t] === pfx);
+            editing[type] = null;
+            document.getElementById(FORM_ID[type]).reset();
+            if (type === 'project') document.getElementById('prj-remaining').value = '';
+            document.getElementById(`${pfx}-submit-text`).textContent = ADD_LABEL[pfx];
+            document.getElementById(`${pfx}-cancel-btn`).classList.add('hidden');
+        }
+        async function saveEdit(type) {
+            const id = editing[type];
+            const record = collectForm(type);
+            await run('儲存修改', async () => {
+                await api('update', { type, id, record });
+                const item = getListByType(type).find(i => i.id === id);
+                if (item) Object.assign(item, record);
+            });
+            cancelEdit(PREFIX[type]);
+            render();
+        }
+
+        function renderBankCell(bankName, accountNo) {
+            const hasBank = bankName && bankName !== '-';
+            const hasAcc = accountNo && accountNo !== '-';
+            if (!hasBank && !hasAcc) {
+                return `<span class="text-slate-400 text-xs">-</span>`;
+            }
+            return `
+                <div class="text-xs leading-snug">
+                    ${hasBank ? `<div class="font-medium text-slate-700">${bankName}</div>` : ''}
+                    ${hasAcc ? `<div class="font-mono text-slate-500 mt-0.5 select-all">${accountNo}</div>` : ''}
+                </div>
+            `;
+        }
+
+        function formatBankText(bankName, accountNo) {
+            const parts = [];
+            if (bankName && bankName !== '-') parts.push(bankName);
+            if (accountNo && accountNo !== '-') parts.push(accountNo);
+            return parts.length > 0 ? parts.join(' / ') : '-';
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function readFilesAsDataUrls(fileList) {
+            const validFiles = [];
+            const rejectedNames = [];
+
+            for (const file of Array.from(fileList)) {
+                if (file.size > MAX_SINGLE_FILE_BYTES) {
+                    rejectedNames.push(`${file.name} (${formatFileSize(file.size)})`);
+                } else {
+                    validFiles.push(file);
+                }
+            }
+
+            if (rejectedNames.length > 0) {
+                alert(`以下檔案超過單檔 25MB 上限，已略過：\n${rejectedNames.join('\n')}`);
+            }
+
+            return Promise.all(
+                validFiles.map(file => new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve({
+                        id: 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                        name: file.name,
+                        type: file.type || 'application/octet-stream',
+                        size: file.size,
+                        dataUrl: reader.result
+                    });
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                }))
+            );
+        }
+
+        function toApiFile(f) { return { name: f.name, type: f.type, data: String(f.dataUrl).split(',')[1] }; }
+
+        function renderPendingPreview(prefix) {
+            const previewEl = document.getElementById(`${prefix}-file-preview`);
+            const files = pendingAttachments[prefix] || [];
+            if (files.length === 0) {
+                previewEl.classList.add('hidden');
+                previewEl.innerHTML = '';
+                return;
+            }
+            previewEl.classList.remove('hidden');
+            previewEl.innerHTML = files.map((f, idx) => `
+                <div class="flex items-center justify-between bg-indigo-50/80 px-2 py-1 rounded text-indigo-700">
+                    <span class="truncate">${f.name} (${formatFileSize(f.size)})</span>
+                    <button type="button" onclick="removePendingFile('${prefix}', ${idx})" class="text-[10px] text-rose-600 hover:underline ml-2 shrink-0">移除</button>
+                </div>
+            `).join('');
+        }
+
+        function removePendingFile(prefix, idx) {
+            pendingAttachments[prefix].splice(idx, 1);
+            if (pendingAttachments[prefix].length === 0) {
+                document.getElementById(`${prefix}-file`).value = '';
+            }
+            renderPendingPreview(prefix);
+        }
+
+        async function handleFileInput(event, prefix) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            const parsed = await readFilesAsDataUrls(files);
+            pendingAttachments[prefix] = pendingAttachments[prefix].concat(parsed);
+            renderPendingPreview(prefix);
+        }
+
+        function triggerAddFilesInModal() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = '.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx';
+            input.onchange = async function(e) {
+                if (!e.target.files || e.target.files.length === 0) return;
+                const parsed = await readFilesAsDataUrls(e.target.files);
+                if (parsed.length === 0) return;
+                const { type, recordId } = modalContext;
+                const record = getListByType(type).find(i => i.id === recordId);
+                if (!record) return;
+                await run('上傳附件', async () => {
+                    record.attachments = await api('addAttachments', { type, id: recordId, files: parsed.map(toApiFile) });
+                });
+                modalContext.selectedAttId = record.attachments[record.attachments.length - 1].id;
+                render();
+                await openAttachmentModal(type, recordId, modalContext.selectedAttId);
+            };
+            input.click();
+        }
+
+        async function openAttachmentModal(type, recordId, selectedAttId = null) {
+            const list = getListByType(type);
+            const record = list.find(i => i.id === recordId);
+            if (!record) return;
+
+            modalContext = {
+                type,
+                recordId,
+                selectedAttId: selectedAttId || (record.attachments[0] ? record.attachments[0].id : null)
+            };
+
+            const modal = document.getElementById('attachment-modal');
+            const titleEl = document.getElementById('modal-doc-title');
+            const listEl = document.getElementById('modal-file-list');
+            const bodyEl = document.getElementById('modal-file-body');
+
+            const labelNo = type === 'setup' ? `${record.code}（${record.tranche}）` : `單號 ${record.docNo}`;
+            titleEl.textContent = `${labelNo} — 附件管理（共 ${record.attachments.length} 個檔案）`;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            if (record.attachments.length === 0) {
+                listEl.innerHTML = `<span class="text-xs text-slate-500">尚未上傳任何附件，點擊右上角「新增附件」即可上傳（單檔上限 25MB）。</span>`;
+                bodyEl.innerHTML = `<div class="text-center py-10 text-sm text-slate-400">目前無附件可預覽</div>`;
+                if (window.lucide) lucide.createIcons();
+                return;
+            }
+
+            listEl.innerHTML = record.attachments.map(att => {
+                const isActive = att.id === modalContext.selectedAttId;
+                return `
+                    <div class="inline-flex items-center gap-1 rounded-lg border text-xs ${isActive ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300'}">
+                        <button onclick="openAttachmentModal('${type}', '${recordId}', '${att.id}')" class="px-2.5 py-1.5 font-medium truncate max-w-[180px]" title="${att.name}">
+                            ${att.name} (${formatFileSize(att.size)})
+                        </button>
+                        <button onclick="deleteSingleAttachment('${type}', '${recordId}', '${att.id}')" class="pr-2 py-1.5 opacity-80 hover:opacity-100" title="移除此附件">
+                            ×
+                        </button>
+                    </div>
+                `;
+            }).join('');
+
+            const activeMeta = record.attachments.find(a => a.id === modalContext.selectedAttId) || record.attachments[0];
+            let fullFile = attachmentMemoryCache[activeMeta.fileId];
+            if (!fullFile) {
+                bodyEl.innerHTML = `<div class="text-center py-10 text-sm text-slate-400">載入附件中…</div>`;
+                try {
+                    const f = await api('getAttachment', { fileId: activeMeta.fileId });
+                    fullFile = { name: f.name, type: f.type, size: f.size, dataUrl: 'data:' + f.type + ';base64,' + f.data };
+                    attachmentMemoryCache[activeMeta.fileId] = fullFile;
+                } catch (e) { fullFile = null; }
+            }
+
+            if (!fullFile || !fullFile.dataUrl) {
+                bodyEl.innerHTML = `<div class="text-center py-8 text-sm text-slate-500">找不到檔案內容。<a href="${activeMeta.url || '#'}" target="_blank" class="text-indigo-600 underline">在 Google Drive 開啟</a></div>`;
+            } else {
+                bodyEl.innerHTML = `
+                    <div class="w-full flex flex-col items-center gap-4">
+                        <div class="w-full flex items-center justify-between bg-white px-4 py-2.5 rounded-xl border border-slate-200">
+                            <span class="text-xs font-medium text-slate-700 truncate">${fullFile.name}（${formatFileSize(fullFile.size)}）</span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <a href="${activeMeta.url || '#'}" target="_blank" class="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-medium">Drive</a>
+                                <a href="${fullFile.dataUrl}" download="${fullFile.name}" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium">下載檔案</a>
+                            </div>
+                        </div>
+                        ${renderPreviewContent(fullFile)}
+                    </div>
+                `;
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function renderPreviewContent(fullFile) {
+            if (fullFile.type.startsWith('image/')) {
+                return `<img src="${fullFile.dataUrl}" alt="${fullFile.name}" class="max-w-full max-h-[58vh] rounded-lg shadow-sm object-contain">`;
+            }
+            if (fullFile.type === 'application/pdf') {
+                return `<iframe src="${fullFile.dataUrl}" class="w-full h-[58vh] rounded-lg border border-slate-200 bg-white"></iframe>`;
+            }
+            return `<div class="text-center py-8 text-sm text-slate-600">此檔案格式（${fullFile.name}）無法直接內嵌預覽，請點擊上方「下載檔案」檢視。</div>`;
+        }
+
+        async function deleteSingleAttachment(type, recordId, attId) {
+            const record = getListByType(type).find(i => i.id === recordId);
+            if (!record) return;
+            if (!confirm('確定移除這個附件？')) return;
+            await run('移除附件', async () => {
+                record.attachments = await api('deleteAttachment', { type, id: recordId, attId });
+            });
+            const nextId = record.attachments[0] ? record.attachments[0].id : null;
+            render();
+            await openAttachmentModal(type, recordId, nextId);
+        }
+
+        function closeAttachmentModal() {
+            const modal = document.getElementById('attachment-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('modal-file-body').innerHTML = '';
+        }
+
+        function renderAttachmentCell(type, item) {
+            const count = (item.attachments || []).length;
+            if (count > 0) {
+                const first = item.attachments[0];
+                const label = count === 1 ? first.name : `${count} 個附件`;
+                return `
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="openAttachmentModal('${type}', '${item.id}', '${first.id}')" class="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition max-w-[130px] truncate" title="${item.attachments.map(a => a.name).join('、')}">
+                            <i data-lucide="paperclip" class="w-3.5 h-3.5 shrink-0"></i>
+                            <span class="truncate">${label}</span>
+                        </button>
+                        <button onclick="openAttachmentModal('${type}', '${item.id}')" class="text-[11px] text-slate-500 hover:text-slate-800 px-1.5 py-1 rounded hover:bg-slate-100 transition" title="管理附件">
+                            管理
+                        </button>
+                    </div>
+                `;
+            }
+            return `
+                <button onclick="openAttachmentModal('${type}', '${item.id}')" class="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600 border border-dashed border-slate-300 hover:border-indigo-400 px-2.5 py-1 rounded-lg transition">
+                    <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                    <span>上傳附件</span>
+                </button>
+            `;
+        }
+
+        function getListByType(type) {
+            if (type === 'setup') return setupData;
+            if (type === 'project') return projectData;
+            if (type === 'salary') return salaryData;
+            return vendorData;
+        }
+
+        function calculateProjectRemaining() {
+            const adv = parseFloat(document.getElementById('prj-advance').value) || 0;
+            const off = parseFloat(document.getElementById('prj-offset').value) || 0;
+            const remField = document.getElementById('prj-remaining');
+            if (adv > 0 || off > 0) {
+                remField.value = Math.round(adv - off);
+            } else {
+                remField.value = '';
+            }
+        }
+
+        function calculateTotalSalary() {
+            const hourly = parseFloat(document.getElementById('sal-hourly').value) || 0;
+            const hours = parseFloat(document.getElementById('sal-hours').value) || 0;
+            if (hourly > 0 && hours > 0) {
+                document.getElementById('sal-amount').value = Math.round(hourly * hours);
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            const sections = {
+                setup: document.getElementById('section-setup'),
+                project: document.getElementById('section-project'),
+                salary: document.getElementById('section-salary'),
+                vendor: document.getElementById('section-vendor')
+            };
+            const buttons = {
+                setup: document.getElementById('tab-setup-btn'),
+                project: document.getElementById('tab-project-btn'),
+                salary: document.getElementById('tab-salary-btn'),
+                vendor: document.getElementById('tab-vendor-btn')
+            };
+
+            Object.keys(sections).forEach(key => {
+                if (key === tab) {
+                    sections[key].classList.remove('hidden');
+                    buttons[key].className = "px-3.5 py-2 rounded-lg font-medium text-sm transition bg-indigo-600 text-white shadow-sm";
+                } else {
+                    sections[key].classList.add('hidden');
+                    buttons[key].className = "px-3.5 py-2 rounded-lg font-medium text-sm transition text-slate-700 hover:bg-slate-300";
+                }
+            });
+            render();
+        }
+
+
+
+        async function addSetupRecord(e) {
+            e.preventDefault();
+            if (editing.setup) { await saveEdit('setup'); return; }
+            const record = { ...collectForm('setup'), status: '待撥付' };
+            await run('新增', async () => {
+                const row = await api('add', { type: 'setup', record, files: pendingAttachments.stp.map(toApiFile) });
+                setupData.push(row);
+            });
+            document.getElementById('setup-form').reset();
+            pendingAttachments.stp = [];
+            renderPendingPreview('stp');
+            render();
+        }
+
+        async function addProjectRecord(e) {
+            e.preventDefault();
+            if (editing.project) { await saveEdit('project'); return; }
+            const record = { ...collectForm('project'), status: '待核銷' };
+            await run('新增', async () => {
+                const row = await api('add', { type: 'project', record, files: pendingAttachments.prj.map(toApiFile) });
+                projectData.push(row);
+            });
+            document.getElementById('project-form').reset();
+            document.getElementById('prj-remaining').value = '';
+            pendingAttachments.prj = [];
+            renderPendingPreview('prj');
+            render();
+        }
+
+        async function addSalaryRecord(e) {
+            e.preventDefault();
+            if (editing.salary) { await saveEdit('salary'); return; }
+            const record = { ...collectForm('salary'), status: '待核銷' };
+            await run('新增', async () => {
+                const row = await api('add', { type: 'salary', record, files: pendingAttachments.sal.map(toApiFile) });
+                salaryData.push(row);
+            });
+            document.getElementById('salary-form').reset();
+            pendingAttachments.sal = [];
+            renderPendingPreview('sal');
+            render();
+        }
+
+        async function addVendorRecord(e) {
+            e.preventDefault();
+            if (editing.vendor) { await saveEdit('vendor'); return; }
+            const record = { ...collectForm('vendor'), status: '待付款' };
+            await run('新增', async () => {
+                const row = await api('add', { type: 'vendor', record, files: pendingAttachments.ven.map(toApiFile) });
+                vendorData.push(row);
+            });
+            document.getElementById('vendor-form').reset();
+            pendingAttachments.ven = [];
+            renderPendingPreview('ven');
+            render();
+        }
+
+        async function toggleStatus(type, id) {
+            const item = getListByType(type).find(i => i.id === id);
+            if (!item) return;
+            await run('更新狀態', async () => {
+                const r = await api('toggleStatus', { type, id });
+                item.status = r.status;
+            });
+            render();
+        }
+
+        async function deleteRecord(type, id) {
+            if (!confirm('確定要刪除這筆紀錄嗎？（附件也會一併移到 Google Drive 垃圾桶）')) return;
+            await run('刪除', async () => { await api('delete', { type, id }); });
+            if (type === 'setup') setupData = setupData.filter(i => i.id !== id);
+            else if (type === 'project') projectData = projectData.filter(i => i.id !== id);
+            else if (type === 'salary') salaryData = salaryData.filter(i => i.id !== id);
+            else vendorData = vendorData.filter(i => i.id !== id);
+            render();
+        }
+
+        function syncProjectOptions() {
+            const uniqueProjects = [...new Set([
+                ...setupData.map(i => i.project),
+                ...projectData.map(i => i.project)
+            ])];
+
+            const datalist = document.getElementById('registered-project-names');
+            if (datalist) {
+                datalist.innerHTML = uniqueProjects.map(p => `<option value="${p}"></option>`).join('');
+            }
+
+            const select = document.getElementById('summary-project-filter');
+            const currentVal = select.value;
+            select.innerHTML = `<option value="ALL">全部計畫</option>` + uniqueProjects.map(p => `<option value="${p}">${p}</option>`).join('');
+            if (currentVal && (currentVal === 'ALL' || uniqueProjects.includes(currentVal))) {
+                select.value = currentVal;
+            }
+        }
+
+        function renderCategorySummary() {
+            syncProjectOptions();
+            const selectedProject = document.getElementById('summary-project-filter').value;
+            const filtered = byYear(selectedProject === 'ALL'
+                ? projectData
+                : projectData.filter(i => i.project === selectedProject));
+
+            const badgeStyles = {
+                '業務費': 'bg-sky-50 text-sky-700 border-sky-200',
+                '人事費': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                '管理費': 'bg-amber-50 text-amber-700 border-amber-200',
+                '資本門': 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            };
+
+            const cardsContainer = document.getElementById('category-summary-cards');
+            cardsContainer.innerHTML = CATEGORIES.map(cat => {
+                const items = filtered.filter(i => i.category === cat);
+                const sum = items.reduce((acc, cur) => acc + cur.amount, 0);
+                const advSum = items.reduce((acc, cur) => acc + (cur.advanceAmount || 0), 0);
+                const offSum = items.reduce((acc, cur) => acc + (cur.offsetAmount || 0), 0);
+                const remSum = advSum - offSum;
+                return `
+                    <div class="p-4 rounded-xl border bg-slate-50/70 ${badgeStyles[cat] || 'border-slate-200'}">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold">${cat}</span>
+                            <span class="text-[11px] opacity-80">${items.length} 筆</span>
+                        </div>
+                        <div class="text-lg font-bold text-slate-900 mt-1.5">NT$ ${sum.toLocaleString()}</div>
+                        <div class="text-[11px] text-slate-600 mt-1">
+                            已沖銷：NT$ ${offSum.toLocaleString()} ｜ 預支剩餘：NT$ ${remSum.toLocaleString()}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function joinAttachmentNames(atts) {
+            if (!atts || atts.length === 0) return '無';
+            return atts.map(a => a.name).join('；');
+        }
+
+        function exportToExcel() {
+            const wb = XLSX.utils.book_new();
+
+            const setupExport = setupData.map(item => ({
+                '年度': item.year || '',
+                '計畫編號': item.code,
+                '計畫名稱': item.project,
+                '委託/補助單位': item.agency,
+                '計畫起日': item.startDate,
+                '計畫迄日': item.endDate,
+                '核定總經費 (NT$)': item.totalBudget,
+                '期款期別': item.tranche,
+                '本批撥付金額 (NT$)': item.trancheAmount,
+                '撥付時間': item.payDate,
+                '入帳銀行': item.bankName || '-',
+                '入帳帳號': item.accountNo || '-',
+                '附件檔名': joinAttachmentNames(item.attachments),
+                '備註說明': item.note,
+                '撥付狀態': item.status
+            }));
+            const setupWS = XLSX.utils.json_to_sheet(setupExport);
+            XLSX.utils.book_append_sheet(wb, setupWS, "計畫建檔與期款撥付");
+
+            const projectExport = projectData.map(item => {
+                const adv = item.advanceAmount || 0;
+                const off = item.offsetAmount || 0;
+                const rem = adv - off;
+                return {
+                    '年度': item.year || '',
+                    '核銷單號': item.docNo,
+                    '計畫名稱': item.project,
+                    '經費科目': item.category,
+                    '核銷日期': item.date,
+                    '支出金額 (NT$)': item.amount,
+                    '預支款金額 (NT$)': adv,
+                    '已沖銷金額 (NT$)': off,
+                    '預支款剩餘 (NT$)': rem,
+                    '匯款銀行': item.bankName || '-',
+                    '匯款帳號': item.accountNo || '-',
+                    '附件檔名': joinAttachmentNames(item.attachments),
+                    '備註說明': item.note,
+                    '狀態': item.status
+                };
+            });
+            const projectWS = XLSX.utils.json_to_sheet(projectExport);
+            XLSX.utils.book_append_sheet(wb, projectWS, "計畫經費科目明細");
+
+            const salaryExport = salaryData.map(item => ({
+                '年度': item.year || '',
+                '核銷單號': item.docNo,
+                '姓名': item.name,
+                '人員類別': item.staffType || '工讀生',
+                '聘任計畫': item.project,
+                '發放月份': item.month,
+                '時薪 (NT$)': item.hourlyRate > 0 ? item.hourlyRate : '-',
+                '工時 (小時)': item.hoursWorked > 0 ? item.hoursWorked : '-',
+                '總薪資 (NT$)': item.amount,
+                '匯款銀行': item.bankName || '-',
+                '匯款帳號': item.accountNo || '-',
+                '附件檔名': joinAttachmentNames(item.attachments),
+                '備註說明': item.note,
+                '狀態': item.status
+            }));
+            const salaryWS = XLSX.utils.json_to_sheet(salaryExport);
+            XLSX.utils.book_append_sheet(wb, salaryWS, "員工薪資明細");
+
+            const vendorExport = vendorData.map(item => ({
+                '年度': item.year || '',
+                '核銷單號': item.docNo,
+                '廠商名稱': item.name,
+                '合作項目／說明': item.item,
+                '付款期限': item.date,
+                '金額 (NT$)': item.amount,
+                '匯款銀行': item.bankName || '-',
+                '匯款帳號': item.accountNo || '-',
+                '附件檔名': joinAttachmentNames(item.attachments),
+                '備註說明': item.note,
+                '狀態': item.status
+            }));
+            const vendorWS = XLSX.utils.json_to_sheet(vendorExport);
+            XLSX.utils.book_append_sheet(wb, vendorWS, "廠商請款明細");
+
+            const fileName = `財務追蹤報表_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+        }
+
+        function render() {
+            renderYearFilter();
+            defaultYears();
+            const stpTbody = document.getElementById('setup-table');
+            stpTbody.innerHTML = byYear(setupData).map(item => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-4 text-slate-500 text-xs">${item.year || "-"}</td>
+                    <td class="p-4 font-mono text-slate-600 font-medium">${item.code}</td>
+                    <td class="p-4 font-medium text-slate-900">${item.project}</td>
+                    <td class="p-4 text-slate-600">${item.agency}</td>
+                    <td class="p-4 text-slate-500 text-xs">${item.startDate} ～ ${item.endDate}</td>
+                    <td class="p-4 font-semibold text-indigo-700">NT$ ${Number(item.totalBudget).toLocaleString()}</td>
+                    <td class="p-4">
+                        <span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                            ${item.tranche}
+                        </span>
+                    </td>
+                    <td class="p-4 text-slate-600">${item.payDate}</td>
+                    <td class="p-4 font-semibold text-slate-900">NT$ ${Number(item.trancheAmount).toLocaleString()}</td>
+                    <td class="p-4">${renderBankCell(item.bankName, item.accountNo)}</td>
+                    <td class="p-4">${renderAttachmentCell('setup', item)}</td>
+                    <td class="p-4 text-slate-500 text-xs">${item.note}</td>
+                    <td class="p-4">${renderStatusSelect('setup', item)}</td>
+                    <td class="p-4 text-right space-x-1 whitespace-nowrap">
+                        <button onclick="startEdit('setup', '${item.id}')" class="text-xs px-2.5 py-1 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition">
+                            編輯
+                        </button>
+                        <button onclick="deleteRecord('setup', '${item.id}')" class="text-xs px-2.5 py-1 text-red-600 hover:bg-red-50 rounded-lg transition">
+                            刪除
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+
+            const prjTbody = document.getElementById('project-table');
+            prjTbody.innerHTML = byYear(projectData).map(item => {
+                const adv = item.advanceAmount || 0;
+                const off = item.offsetAmount || 0;
+                const rem = adv - off;
+                const remText = adv > 0 || off > 0 ? `NT$ ${rem.toLocaleString()}` : '-';
+                const remColor = rem < 0 ? 'text-rose-600' : (rem > 0 ? 'text-indigo-700' : 'text-slate-600');
+                return `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="p-4 text-slate-500 text-xs">${item.year || "-"}</td>
+                        <td class="p-4 font-mono text-slate-600 font-medium">${item.docNo}</td>
+                        <td class="p-4 font-medium text-slate-900">${item.project}</td>
+                        <td class="p-4">
+                            <span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                ${item.category}
+                            </span>
+                        </td>
+                        <td class="p-4 text-slate-500">${item.date}</td>
+                        <td class="p-4 font-semibold text-slate-900">NT$ ${Number(item.amount).toLocaleString()}</td>
+                        <td class="p-4 text-slate-600">${adv > 0 ? 'NT$ ' + adv.toLocaleString() : '-'}</td>
+                        <td class="p-4 text-emerald-700 font-medium">${off > 0 ? 'NT$ ' + off.toLocaleString() : '-'}</td>
+                        <td class="p-4 font-semibold ${remColor}">${remText}</td>
+                        <td class="p-4">${renderBankCell(item.bankName, item.accountNo)}</td>
+                        <td class="p-4">${renderAttachmentCell('project', item)}</td>
+                        <td class="p-4 text-slate-500 text-xs">${item.note}</td>
+                        <td class="p-4">${renderStatusSelect('project', item)}</td>
+                    <td class="p-4 text-right space-x-1 whitespace-nowrap">
+                        <button onclick="startEdit('project', '${item.id}')" class="text-xs px-2.5 py-1 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition">
+                            編輯
+                        </button>
+                        <button onclick="deleteRecord('project', '${item.id}')" class="text-xs px-2.5 py-1 text-red-600 hover:bg-red-50 rounded-lg transition">
+                                刪除
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            const salTbody = document.getElementById('salary-table');
+            const salaryVisible = byYear(salaryFilter === 'ALL' ? salaryData : salaryData.filter(i => (i.staffType || '工讀生') === salaryFilter));
+            renderSalaryFilterBar();
+            salTbody.innerHTML = salaryVisible.map(item => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-4 text-slate-500 text-xs">${item.year || "-"}</td>
+                    <td class="p-4 font-mono text-slate-600 font-medium">${item.docNo}</td>
+                    <td class="p-4 font-medium text-slate-900">${item.name}</td>
+                    <td class="p-4"><span class="px-2 py-0.5 rounded-lg text-xs font-semibold border ${staffTypeClass(item.staffType || '工讀生')}">${item.staffType || '工讀生'}</span></td>
+                    <td class="p-4 text-slate-600 font-medium">${item.project}</td>
+                    <td class="p-4 text-slate-500">${item.month}</td>
+                    <td class="p-4 text-slate-600">${item.hourlyRate > 0 ? 'NT$ ' + item.hourlyRate : '-'}</td>
+                    <td class="p-4 text-slate-600">${item.hoursWorked > 0 ? item.hoursWorked + ' hr' : '-'}</td>
+                    <td class="p-4 font-semibold text-slate-900">NT$ ${Number(item.amount).toLocaleString()}</td>
+                    <td class="p-4">${renderBankCell(item.bankName, item.accountNo)}</td>
+                    <td class="p-4">${renderAttachmentCell('salary', item)}</td>
+                    <td class="p-4 text-slate-500 text-xs">${item.note}</td>
+                    <td class="p-4">${renderStatusSelect('salary', item)}</td>
+                    <td class="p-4 text-right space-x-1 whitespace-nowrap">
+                        <button onclick="startEdit('salary', '${item.id}')" class="text-xs px-2.5 py-1 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition">
+                            編輯
+                        </button>
+                        <button onclick="deleteRecord('salary', '${item.id}')" class="text-xs px-2.5 py-1 text-red-600 hover:bg-red-50 rounded-lg transition">
+                            刪除
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+
+            const venTbody = document.getElementById('vendor-table');
+            venTbody.innerHTML = byYear(vendorData).map(item => `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="p-4 text-slate-500 text-xs">${item.year || "-"}</td>
+                    <td class="p-4 font-mono text-slate-600 font-medium">${item.docNo}</td>
+                    <td class="p-4 font-medium text-slate-900">${item.name}</td>
+                    <td class="p-4 text-slate-500">${item.item}</td>
+                    <td class="p-4 text-slate-500">${item.date}</td>
+                    <td class="p-4 font-semibold text-slate-900">NT$ ${Number(item.amount).toLocaleString()}</td>
+                    <td class="p-4">${renderBankCell(item.bankName, item.accountNo)}</td>
+                    <td class="p-4">${renderAttachmentCell('vendor', item)}</td>
+                    <td class="p-4 text-slate-500 text-xs">${item.note}</td>
+                    <td class="p-4">${renderStatusSelect('vendor', item)}</td>
+                    <td class="p-4 text-right space-x-1 whitespace-nowrap">
+                        <button onclick="startEdit('vendor', '${item.id}')" class="text-xs px-2.5 py-1 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition">
+                            編輯
+                        </button>
+                        <button onclick="deleteRecord('vendor', '${item.id}')" class="text-xs px-2.5 py-1 text-red-600 hover:bg-red-50 rounded-lg transition">
+                            刪除
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+
+            renderCategorySummary();
+
+            if (currentTab === 'setup') {
+                document.getElementById('kpi-1-label').innerText = '期款撥付總額';
+                document.getElementById('kpi-2-label').innerText = '已撥付金額';
+                document.getElementById('kpi-3-label').innerText = '待撥付金額';
+                const total = byYear(setupData).reduce((acc, cur) => acc + Number(cur.trancheAmount), 0);
+                const paid = byYear(setupData).filter(i => i.status === '已撥付').reduce((acc, cur) => acc + Number(cur.trancheAmount), 0);
+                const unpaid = total - paid;
+                document.getElementById('total-amount').innerText = `NT$ ${total.toLocaleString()}`;
+                document.getElementById('paid-amount').innerText = `NT$ ${paid.toLocaleString()}`;
+                document.getElementById('unpaid-amount').innerText = `NT$ ${unpaid.toLocaleString()}`;
+            } else {
+                document.getElementById('kpi-1-label').innerText = '總預計支出';
+                document.getElementById('kpi-2-label').innerText = '已結清／已付款金額';
+                document.getElementById('kpi-3-label').innerText = '待處理解核／付款';
+                const activeData = byYear(currentTab === 'project' ? projectData : (currentTab === 'salary' ? (salaryFilter === 'ALL' ? salaryData : salaryData.filter(i => (i.staffType || '工讀生') === salaryFilter)) : vendorData));
+                const paidKey = DONE_STATUS[currentTab];
+                const total = activeData.reduce((acc, cur) => acc + cur.amount, 0);
+                const paid = activeData.filter(i => i.status === paidKey).reduce((acc, cur) => acc + cur.amount, 0);
+                const unpaid = total - paid;
+                document.getElementById('total-amount').innerText = `NT$ ${total.toLocaleString()}`;
+                document.getElementById('paid-amount').innerText = `NT$ ${paid.toLocaleString()}`;
+                document.getElementById('unpaid-amount').innerText = `NT$ ${unpaid.toLocaleString()}`;
+            }
+
+            if (window.lucide) {
+                lucide.createIcons();
+            }
+        }
+
+        render();
+        boot();
+    </script>
+</body>
+</html>
